@@ -214,6 +214,20 @@ EOF
 #     dns-nameserver 2606:4700:4700::1111
 #     dns-nameserver 2001:4860:4860::8888
 
+# proxmox ve
+
+# # mac 11:22:33:44:55:66    # 用此行匹配网卡
+# auto eth0
+# iface eth0 inet manual
+#
+# auto vmbr0
+# iface vmbr0 inet static
+#     address 1.1.1.1/25
+#     gateway 1.1.1.1
+#     bridge-ports eth0
+#     bridge-stp off
+#     bridge-fd 0
+
 fix_ifupdown() {
     file=/etc/network/interfaces
     tmp_file=$file.tmp
@@ -235,7 +249,9 @@ fix_ifupdown() {
                 if [ -n "$ethx" ]; then
                     line=$(echo "$line" | awk "{\$2=\"$ethx\"; print \$0}")
                 fi
-            elif [[ "$line" = *" dev e"* ]]; then
+            elif [[ "$line" = *" dev e"* ]] ||
+                [[ "$line" = *"bridge-ports e"* ]] ||
+                [[ "$line" = *"bridge_ports e"* ]]; then
                 if [ -n "$ethx" ]; then
                     # awk 会去除前面的空格
                     line=$(echo "$line" | sed -E "s/[^ ]*$/$ethx/")

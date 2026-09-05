@@ -1187,6 +1187,22 @@ create_ifupdown_config() {
 
     rm -f $conf_file
 
+    # proxmox ve 跟官方安装器一样，物理网卡设为 manual，ip 配置在 vmbr 网桥上
+    # 网桥参数只需添加到 vmbr 的第一个 iface 语句
+    # 网桥的 bridge-ports 用的是网卡名，fix-eth-name 会一并修正
+    add_bridge_opts_if_need() {
+        # shellcheck disable=SC2154
+        if [ -n "$pve" ] && ! $bridge_opts_added; then
+            bridge_opts_added=true
+            cat <<EOF >>$conf_file
+    bridge-ports $ethx
+    bridge-stp off
+    bridge-fd 0
+EOF
+        fi
+    }
+    bridge_index=0
+
     if is_distro_like_debian; then
         cat <<EOF >>$conf_file
 source /etc/network/interfaces.d/*
@@ -1241,15 +1257,31 @@ EOF
             echo $mode $ethx
         } >>$conf_file
 
+        # proxmox ve 的 ip 配置在 vmbr 网桥上，其他系统配置在网卡上
+        # shellcheck disable=SC2154
+        if [ -n "$pve" ]; then
+            iface=vmbr$bridge_index
+            bridge_index=$((bridge_index + 1))
+            cat <<EOF >>$conf_file
+iface $ethx inet manual
+
+auto $iface
+EOF
+        else
+            iface=$ethx
+        fi
+        bridge_opts_added=false
+
         # ipv4
         if is_dhcpv4; then
-            echo "iface $ethx inet dhcp" >>$conf_file
+            echo "iface $iface inet dhcp" >>$conf_file
+            add_bridge_opts_if_need
 
         elif is_staticv4; then
             get_netconf_to ipv4_addr
             get_netconf_to ipv4_gateway
             cat <<EOF >>$conf_file
-iface $ethx inet static
+iface $iface inet static
     address $ipv4_addr
     gateway $ipv4_gateway
 EOF
@@ -1261,30 +1293,35 @@ EOF
 EOF
                 done
             fi
+            add_bridge_opts_if_need
         fi
 
         # ipv6
         has_ipv6_iface=false
         if is_slaac; then
-            echo "iface $ethx inet6 auto" >>$conf_file
+            echo "iface $iface inet6 auto" >>$conf_file
             has_ipv6_iface=true
+            add_bridge_opts_if_need
         elif is_dhcpv6; then
             # debian 13 使用 ifupdown + dhcpcd-base
             # inet/inet6 都配置成 dhcp 时，重启后 dhcpv4 会丢失
             # 手动 systemctl restart networking 后正常
             # 删除 dhcpcd-base 安装 isc-dhcp-client（类似 debian 12 升级到 13），轮到 dhcpv6 丢失
-            if { [ "$distro" = debian ] && [ "$releasever" -ge 13 ]; } ||
-                [ "$distro" = kali ]; then
-                echo "iface $ethx inet6 auto" >>$conf_file
+            # proxmox ve 使用 ifupdown2 + isc-dhcp-client，没有这个问题
+            if [ -z "$pve" ] &&
+                { { [ "$distro" = debian ] && [ "$releasever" -ge 13 ]; } ||
+                    [ "$distro" = kali ]; }; then
+                echo "iface $iface inet6 auto" >>$conf_file
             else
-                echo "iface $ethx inet6 dhcp" >>$conf_file
+                echo "iface $iface inet6 dhcp" >>$conf_file
             fi
             has_ipv6_iface=true
+            add_bridge_opts_if_need
         elif is_staticv6; then
             get_netconf_to ipv6_addr
             get_netconf_to ipv6_gateway
             cat <<EOF >>$conf_file
-iface $ethx inet6 static
+iface $iface inet6 static
     address $ipv6_addr
     gateway $ipv6_gateway
 EOF
@@ -1300,8 +1337,8 @@ EOF
                 # 注释最后一行，也就是 gateway
                 sed -Ei '$s/^( *)/\1# /' "$conf_file"
                 cat <<EOF >>$conf_file
-    post-up ip route add $ipv6_gateway dev $ethx
-    post-up ip route add default via $ipv6_gateway dev $ethx
+    post-up ip route add $ipv6_gateway dev $iface
+    post-up ip route add default via $ipv6_gateway dev $iface
 EOF
             fi
 
@@ -1311,10 +1348,11 @@ EOF
                 (
                     IFS=','
                     for _addr in $ipv6_extra_addrs; do
-                        echo "    post-up ip -6 addr add $_addr dev $ethx" >>$conf_file
+                        echo "    post-up ip -6 addr add $_addr dev $iface" >>$conf_file
                     done
                 )
             fi
+            add_bridge_opts_if_need
         fi
         # accept_ra/autoconf 属于 iface 选项
         # 如果当前网卡没有生成 IPv6 iface stanza，
@@ -1322,7 +1360,13 @@ EOF
         if ! $has_ipv6_iface &&
             { should_disable_accept_ra || should_disable_autoconf; } &&
             [ "$distro" != alpine ]; then
-            echo "iface $ethx inet6 manual" >>$conf_file
+            echo "iface $iface inet6 manual" >>$conf_file
+            add_bridge_opts_if_need
+        fi
+        # proxmox ve 兜底，没有任何 iface 语句时（理论上不会发生）也要创建网桥
+        if [ -n "$pve" ] && ! $bridge_opts_added; then
+            echo "iface $iface inet manual" >>$conf_file
+            add_bridge_opts_if_need
         fi
         # dns
         # 有 ipv6 但需设置 dns 的情况

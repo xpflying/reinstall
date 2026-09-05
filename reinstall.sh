@@ -6,8 +6,8 @@
 # alpine 默认没有 bash，因此 shebang 用 sh，再 exec 切换到 bash
 
 set -eE
-confhome=https://raw.githubusercontent.com/bin456789/reinstall/main
-confhome_cn=https://cnb.cool/bin456789/reinstall/-/git/raw/main
+confhome=https://raw.githubusercontent.com/xpflying/reinstall/main
+confhome_cn=https://cdn.jsdelivr.net/gh/xpflying/reinstall@main
 # confhome_cn=https://www.ghproxy.cc/https://raw.githubusercontent.com/bin456789/reinstall/main
 
 # 用于判断 reinstall.sh 和 trans.sh 是否兼容
@@ -91,6 +91,7 @@ Usage: $reinstall_____ anolis      7|8|23
                        nixos       26.05
                        fedora      43|44
                        debian      9|10|11|12|13
+                       proxmox     8|9
                        opensuse    16.0|tumbleweed
                        openeuler   20.03|22.03|24.03
                        alpine      3.21|3.22|3.23|3.24
@@ -113,6 +114,7 @@ Usage: $reinstall_____ anolis      7|8|23
                        [--ssh-port    PORT]
                        [--web-port    PORT]
                        [--frpc-config PATH]
+                       [--static]
 
                        For Windows Only:
                        [--allow-ping]
@@ -251,6 +253,12 @@ is_force_use_installer() {
 
 is_use_dd() {
     [ "$distro" = dd ]
+}
+
+# proxmox ve 基于 debian 安装
+# 此时 distro 为 debian，pve 为 proxmox ve 版本号
+is_install_pve() {
+    [ -n "$pve" ]
 }
 
 is_boot_in_separate_partition() {
@@ -1505,6 +1513,16 @@ Continue?
         # 官方安装和云镜像都会用到的
         set_osvar deb_mirror "$deb_mirror"
         set_osvar kernel "linux-image$flavour-$basearch_alt"
+
+        # proxmox ve 源
+        # shellcheck disable=SC2034
+        if is_install_pve; then
+            if is_in_china; then
+                pve_mirror=mirror.nju.edu.cn/proxmox/debian/pve
+            else
+                pve_mirror=download.proxmox.com/debian/pve
+            fi
+        fi
     }
 
     setos_kali() {
@@ -2204,6 +2222,7 @@ verify_os_name() {
         'fedora      43|44' \
         'nixos       26.05' \
         'debian      9|10|11|12|13' \
+        'proxmox     8|9' \
         'opensuse    16.0|tumbleweed' \
         'alpine      3.21|3.22|3.23|3.24' \
         'openeuler   20.03|22.03|24.03' \
@@ -2231,6 +2250,15 @@ verify_os_name() {
             if [ -z "$releasever" ] && [ -n "$vers" ]; then
                 releasever=$(awk -F '|' '{print $NF}' <<<"|$vers")
             fi
+            # proxmox ve 基于 debian 安装
+            # proxmox 8 -> debian 12
+            # proxmox 9 -> debian 13
+            # 加引号是为了避免被 get_latest_distro_releasever 的 grep 匹配到
+            if [ "$distro" = "proxmox" ]; then
+                pve=$releasever
+                distro=debian
+                releasever=$((pve + 4))
+            fi
             return
         fi
     done
@@ -2246,6 +2274,14 @@ verify_os_args() {
     redhat) [ -n "$img" ] || error_and_exit "redhat need --img." ;;
     windows) [ -n "$image_name" ] || error_and_exit "Install Windows need --image-name." ;;
     esac
+
+    # proxmox ve
+    # 1. 官方只支持 x86_64
+    # 2. 网页端只能用 root@pam 登录
+    if is_install_pve; then
+        [ "$basearch" = x86_64 ] || error_and_exit "Proxmox VE only supports x86_64."
+        [ -z "$username" ] || [ "$username" = root ] || error_and_exit "Proxmox VE only supports username root."
+    fi
 
     # 用户名/密码/证书相关
     case "$distro" in
@@ -2500,6 +2536,11 @@ check_ram() {
         esac
     )
 
+    # proxmox ve 要安装大量软件包，运行时也需要更多内存
+    if is_install_pve; then
+        ram_standard=1024
+    fi
+
     # 不用检查内存的情况
     if [ "$ram_standard" -eq 0 ]; then
         return
@@ -2514,6 +2555,11 @@ check_ram() {
         netboot.xyz | alpine | dd | arch | gentoo | nixos | kali | windows) echo false ;;
         esac
     )
+
+    # proxmox ve 只支持传统安装
+    if is_install_pve; then
+        has_cloud_image=false
+    fi
 
     if is_in_windows; then
         ram_size=$(wmic memorychip get capacity | awk -F= '{sum+=$2} END {if(sum>0) print sum/1024/1024}')
@@ -2563,6 +2609,23 @@ check_ram() {
 
     if is_use_cloud_image && [ $ram_size -lt $ram_cloud_image ]; then
         error_and_exit "Could not install $distro using cloud image: RAM < $ram_cloud_image MB."
+    fi
+}
+
+# proxmox ve 安装的软件包较多，加上安装时的 apt 缓存，单分区硬盘至少要 8 GB
+# 当前系统是 windows 时不检查，因为 windows 本身就需要 25 GB 以上的硬盘
+check_disk_size() {
+    if ! is_install_pve || is_in_windows; then
+        return
+    fi
+
+    min_disk_size_gb=8
+    find_main_disk
+    if sectors=$(cat "/sys/block/$xda/size" 2>/dev/null) && is_digit "$sectors"; then
+        disk_size_gb=$((sectors * 512 / 1000 / 1000 / 1000))
+        if [ "$disk_size_gb" -lt "$min_disk_size_gb" ]; then
+            error_and_exit "Proxmox VE needs at least $min_disk_size_gb GB disk, but /dev/$xda is $disk_size_gb GB."
+        fi
     fi
 }
 
@@ -3527,7 +3590,7 @@ build_extra_cmdline() {
     # https://answers.launchpad.net/ubuntu/+question/249456
     # https://salsa.debian.org/installer-team/rootskel/-/blob/master/src/lib/debian-installer-startup.d/S02module-params?ref_type=heads
     for key in confhome hold force_boot_mode force_cn force_old_windows_setup cloud_image main_disk \
-        elts deb_mirror \
+        elts deb_mirror pve pve_mirror static_ip \
         username ssh_port rdp_port web_port web_path allow_ping; do
         value=${!key}
         if [ -n "$value" ]; then
@@ -3563,8 +3626,12 @@ echo_tmp_ttys() {
 
 get_entry_name() {
     printf 'reinstall ('
-    printf '%s' "$distro"
-    [ -n "$releasever" ] && printf ' %s' "$releasever"
+    if is_install_pve; then
+        printf 'proxmox %s' "$pve"
+    else
+        printf '%s' "$distro"
+        [ -n "$releasever" ] && printf ' %s' "$releasever"
+    fi
     [ "$distro" = alpine ] && [ "$hold" = 1 ] && printf ' Live OS'
     printf ')'
 }
@@ -3850,10 +3917,16 @@ EOF
     curl -LO "$confhome/fix-eth-name.sh"
     curl -LO "$confhome/fix-eth-name.service"
 
+    # 下载 proxmox ve 安装脚本
+    if is_install_pve; then
+        curl -LO "$confhome/pve-setup.sh"
+    fi
+
     # 有段时间 kali initrd 删除了原版 wget
     # 但 initrd 的 busybox wget 又不支持 https
     # 因此改成在这里下载
     curl -LO "$confhome/get-xda.sh"
+    curl -LO "$confhome/clean-disk.sh"
     curl -LO "$confhome/ttys.sh"
     if [ -n "$frpc_config" ]; then
         curl -LO "$confhome/get-frpc-url.sh"
@@ -4000,6 +4073,7 @@ EOF
     insert_into_file $initrd_dir/trans.sh after '^: main' <<EOF
         distro=$nextos_distro
         releasever=$nextos_releasever
+        pve=$pve
         create_ifupdown_config /etc/network/interfaces
         exit
 EOF
@@ -4762,7 +4836,7 @@ fi
 
 # 整理参数
 long_opts=
-for o in ci installer debug minimal allow-ping force-cn help \
+for o in ci installer debug minimal allow-ping force-cn static help \
     add-driver: \
     hold: sleep: \
     iso: \
@@ -4865,6 +4939,11 @@ while true; do
     --force-cn)
         # 仅为了方便测试
         force_cn=1
+        shift
+        ;;
+    --static)
+        # 强制静态 IP：沿用重装前的 IP/网关，即使 DHCP 能获取到相同 IP 也不用 DHCP
+        static_ip=1
         shift
         ;;
     --hold | --sleep)
@@ -5108,6 +5187,12 @@ if ! is_netboot_xyz && [ -z "$ssh_keys" ] && [ -z "$password" ]; then
     prompt_password
 fi
 
+# proxmox ve 只支持传统安装
+if is_install_pve && is_use_cloud_image; then
+    echo "ignored --ci"
+    unset cloud_image
+fi
+
 # 强制忽略/强制添加 --ci 参数
 # debian 不强制忽略 ci 留作测试
 case "$distro" in
@@ -5132,6 +5217,9 @@ esac
 # 检查内存
 # 会用到 wmic，因此要在设置国内 confhome 后使用
 check_ram
+
+# 检查硬盘大小
+check_disk_size
 
 # 以下目标系统不需要两步安装
 # alpine
@@ -5381,7 +5469,11 @@ EOF
 fi
 
 info 'info'
-echo "$distro $releasever"
+if is_install_pve; then
+    echo "proxmox $pve (debian $releasever)"
+else
+    echo "$distro $releasever"
+fi
 
 ssh_port=${ssh_port:-22}
 rdp_port=${rdp_port:-3389}
@@ -5454,6 +5546,33 @@ elif [ "$distro" = dd ]; then
         echo "Public Key: [Depends on image]"
         echo "Password: [Depends on image]"
         echo "SSH Port: [Depends on image]"
+    fi
+
+elif is_install_pve; then
+    info "While Install (View Logs)"
+    echo "Username: $username"
+    if [ -n "$ssh_keys" ]; then
+        echo "Public Key: $ssh_keys"
+    else
+        echo "Password: $password"
+    fi
+    echo "SSH Port: $ssh_port"
+    echo "WEB Port: $web_port"
+
+    info "After Install"
+    echo "Username: $username"
+    if [ -n "$ssh_keys" ]; then
+        echo "Public Key: $ssh_keys"
+    else
+        echo "Password: $password"
+    fi
+    echo "SSH Port: $ssh_port"
+    echo "Web UI: https://IP:8006"
+    echo "Web UI Username: root@pam"
+    if [ -n "$ssh_keys" ]; then
+        echo
+        echo "使用公钥登录时 root 没有密码，请先 SSH 登录运行 passwd 设置密码，再登录 Web UI。"
+        echo "Root has no password when using SSH key. Run passwd via SSH to set one before logging into the Web UI."
     fi
 
 else

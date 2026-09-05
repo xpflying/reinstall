@@ -66,6 +66,7 @@ The system requirements for the target system are as follows:
 | <img width="16" height="16" src="https://www.gentoo.org/assets/img/logo/gentoo-g.png" /> Gentoo                                                                                                                                                                                                                                                                        | Rolling                               | 512 MB    | 5 GB             |
 | <img width="16" height="16" src="https://aosc.io/distros/aosc-os.svg" /> AOSC OS                                                                                                                                                                                                                                                                                       | Rolling                               | 512 MB    | 5 GB             |
 | <img width="16" height="16" src="https://www.fnnas.com/favicon.ico" /> fnOS &nbsp;<img width="16" height="16" src="https://fygonas.com/favicon.ico" /> FygoOS                                                                                                                                                                                                          | 1                                     | 512 MB    | 10 GB            |
+| <img width="16" height="16" src="https://www.proxmox.com/favicon.ico" /> Proxmox VE                                                                                                                                                                                                                                                                                    | 8, 9                                  | 1 GB      | 8 GB             |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (DD)                                                                                                                                                                                                              | Any                                   | 512 MB    | Depends on image |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (ISO)                                                                                                                                                                                                             | Vista, 7, 8.x (Server 2008 - 2012 R2) | 512 MB    | 25 GB            |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (ISO)                                                                                                                                                                                                             | 10, 11 (Server 2016 - 2025)           | 1 GB      | 25 GB            |
@@ -157,6 +158,7 @@ certutil -urlcache -f -split https://cnb.cool/bin456789/reinstall/-/git/raw/main
 - After reinstallation, if you need to change the SSH port or switch to key-based login, make sure to also modify the files inside `/etc/ssh/sshd_config.d/`.
 - To ensure a faster reinstall, the new system will not be updated during the process. Please update the system manually after reinstallation.
 - The username, password, and key configured during the installation of fnOS/FygoOS are only used to log in via SSH to view logs during installation, and will not be applied to the new system. After installation, you need to go to the admin panel at <http://IP:5666> to create a user and enable SSH.
+- When installing Proxmox VE, the script first installs the matching Debian release (8 on Debian 12, 9 on Debian 13), then installs `proxmox-ve` from the `pve-no-subscription` repository following the [official guide](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_13_Trixie). Only x86_64 and the `root` user are supported, and 2 GB or more memory is recommended. Like other distros in this script, there is a single system partition: storage is the `local` directory type, so VM disks (qcow2), containers, ISOs and backups all live in `/var/lib/vz` and there is no `local-lvm`, which means container snapshots are unavailable. Add a second disk and create LVM-Thin or ZFS storage in the web UI if you need them. The NIC is configured as a `vmbr0` bridge. After installation, log in to `https://IP:8006` as `root@pam` with the password (with `--ssh-key`, root has no password, so set one with `passwd` over SSH first). The pre-reinstall IP is reused by default; on a network with DHCP, add `--static` to keep it static, reusing the pre-reinstall IP and gateway.
 
 ```bash
 bash reinstall.sh anolis      7|8|23
@@ -170,6 +172,7 @@ bash reinstall.sh anolis      7|8|23
                   nixos       26.05
                   fedora      43|44
                   debian      9|10|11|12|13
+                  proxmox     8|9
                   opensuse    16.0|tumbleweed
                   openeuler   20.03|22.03|24.03
                   alpine      3.21|3.22|3.23|3.24
@@ -188,6 +191,7 @@ bash reinstall.sh anolis      7|8|23
 - `--ssh-key KEY` Set up SSH login public key, [formatted as follows](#--ssh-key). When using public key, password is empty.
 - `--ssh-port PORT` Change the SSH port
 - `--web-port PORT` Change the Web port (for log observation during installation only)
+- `--static` Force a static IP, reusing the pre-reinstall IP and gateway even if DHCP would hand out the same IP
 - `--frpc-config PATH` Add frpc for intranet tunneling. Parameter can be local filepath or HTTP URL of the configuration file.
 - `--hold 1` Reboot only into install environment, without running installer, only for SSH connect to test network connection.
 - `--hold 2` Prevent reboot after installation completes, allowing SSH login to modify system content; the system is mounted at `/target` for Debian/Kali and `/os` for other distros.
@@ -260,6 +264,7 @@ bash reinstall.sh dd --img "https://example.com/xxx.xz"
 - `--ssh-port PORT` Change SSH port (for log observation during installation)
 - `--rdp-port PORT` Change RDP port (DD Windows only)
 - `--web-port PORT` Change Web port (for log observation during installation)
+- `--static` Force a static IP, reusing the pre-reinstall IP and gateway even if DHCP would hand out the same IP
 - `--allow-ping` Configure Windows Firewall to Allow Ping Responses (DD Windows only)
 - `--frpc-config PATH` Add frpc for intranet tunneling (DD Windows only). Parameter can be local filepath or HTTP URL of the configuration file.
 - `--cloud-data PATH_OR_URL` Inject cloud-init NoCloud configuration into the DD'd Linux image (DD Linux only)
@@ -576,6 +581,7 @@ bash reinstall.sh windows \
 - `--rdp-port PORT` Change RDP port
 - `--ssh-port PORT` Change SSH port (for log observation during installation only)
 - `--web-port PORT` Change Web port (for log observation during installation only)
+- `--static` Force a static IP, reusing the pre-reinstall IP and gateway even if DHCP would hand out the same IP
 - `--allow-ping` Configure Windows Firewall to Allow Ping Responses
 - `--add-driver INF_OR_DIR` Add additional driver, specifying .inf path, or the folder contains .inf file.
   - The driver must be downloaded to current system first.

@@ -13,6 +13,14 @@ ipv6_gateway=$5
 is_in_china=$6
 ipv6_extra_addrs=$7
 
+# 是否强制静态 IP（--static）
+# 从内核 cmdline 读取，d-i 和 alpine 环境都有 /proc/cmdline
+if grep -q 'extra_static_ip=1' /proc/cmdline 2>/dev/null; then
+    static_ip=true
+else
+    static_ip=false
+fi
+
 DHCP_TIMEOUT=15
 DNS_FILE_TIMEOUT=5
 TEST_TIMEOUT=10
@@ -409,6 +417,23 @@ done
 is_have_ipv4_addr && dhcpv4=true || dhcpv4=false
 is_have_ipv6_addr && dhcpv6_or_slaac=true || dhcpv6_or_slaac=false
 is_have_ipv6_gateway && ra_has_gateway=true || ra_has_gateway=false
+
+# 强制静态 IP（--static）
+# 有重装前的 IP/网关时，即使 DHCP/SLAAC 能获取到相同的 IP，也关闭动态、改用静态
+# 没有可用的静态 IP/网关时不处理，避免机器彻底断网
+if $static_ip; then
+    if $dhcpv4 && [ -n "$ipv4_addr" ] && [ -n "$ipv4_gateway" ]; then
+        echo "Force static IPv4 (--static)."
+        should_disable_dhcpv4=true
+        flush_ipv4_config
+    fi
+    if { $dhcpv6_or_slaac || $ra_has_gateway; } && [ -n "$ipv6_addr" ] && [ -n "$ipv6_gateway" ]; then
+        echo "Force static IPv6 (--static)."
+        should_disable_accept_ra=true
+        should_disable_autoconf=true
+        flush_ipv6_config
+    fi
+fi
 
 # 如果自动获取的 IP 不是重装前的，则改成静态，使用之前的 IP
 # 只比较 IP，不比较掩码/网关，因为

@@ -66,6 +66,7 @@
 | <img width="16" height="16" src="https://www.gentoo.org/assets/img/logo/gentoo-g.png" /> Gentoo                                                                                                                                                                                                                                                                        | 滚动                                  | 512 MB    | 5 GB         |
 | <img width="16" height="16" src="https://aosc.io/distros/aosc-os.svg" /> 安同 OS                                                                                                                                                                                                                                                                                       | 滚动                                  | 512 MB    | 5 GB         |
 | <img width="16" height="16" src="https://www.fnnas.com/favicon.ico" /> 飞牛 fnOS &nbsp;<img width="16" height="16" src="https://fygonas.com/favicon.ico" /> FygoOS                                                                                                                                                                                                     | 1                                     | 512 MB    | 10 GB        |
+| <img width="16" height="16" src="https://www.proxmox.com/favicon.ico" /> Proxmox VE                                                                                                                                                                                                                                                                                    | 8, 9                                  | 1 GB      | 8 GB         |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (DD)                                                                                                                                                                                                              | 任何                                  | 512 MB    | 取决于镜像   |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (ISO)                                                                                                                                                                                                             | Vista, 7, 8.x (Server 2008 - 2012 R2) | 512 MB    | 25 GB        |
 | <img width="16" height="16" src="https://blogs.windows.com/wp-content/uploads/prod/2022/09/cropped-Windows11IconTransparent512-32x32.png" /> Windows (ISO)                                                                                                                                                                                                             | 10, 11 (Server 2016 - 2025)           | 1 GB      | 25 GB        |
@@ -157,6 +158,7 @@ certutil -urlcache -f -split https://cnb.cool/bin456789/reinstall/-/git/raw/main
 - 重装后如需修改 SSH 端口或者改成密钥登录，注意还要修改 `/etc/ssh/sshd_config.d/` 里面的文件
 - 为了快速安装，重装时不会对新系统进行更新，请在重装后自行更新
 - 安装飞牛 fnOS/FygoOS 时设置的用户名、密码、密钥仅用于安装期间登录 SSH 查看日志，不会应用到新系统。系统安装后需到后台面板 <http://IP:5666> 创建用户和开启 SSH
+- 安装 Proxmox VE 时，脚本会先安装对应版本的 Debian（8 对应 Debian 12，9 对应 Debian 13），再按[官方文档](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_13_Trixie)从 `pve-no-subscription` 源安装 `proxmox-ve`。仅支持 x86_64 和 `root` 用户，内存建议 2 GB 以上。与项目其他系统一样只有一个系统分区，存储为 `local` 目录类型，虚拟机磁盘（qcow2）、容器、ISO、备份都放在 `/var/lib/vz`，没有 `local-lvm`，因此容器不支持快照，需要的话可加第二块硬盘后在网页端添加 LVM-Thin 或 ZFS。网卡会配置为 `vmbr0` 网桥，安装后用 `root@pam` 和密码登录 `https://IP:8006`（使用 `--ssh-key` 时 root 没有密码，需先 SSH 登录运行 `passwd` 设置）。默认沿用重装前的 IP，若在有 DHCP 的网络里想固定为静态，可加 `--static` 沿用重装前的 IP 和网关
 
 ```bash
 bash reinstall.sh anolis      7|8|23
@@ -170,6 +172,7 @@ bash reinstall.sh anolis      7|8|23
                   nixos       26.05
                   fedora      43|44
                   debian      9|10|11|12|13
+                  proxmox     8|9
                   opensuse    16.0|tumbleweed
                   openeuler   20.03|22.03|24.03
                   alpine      3.21|3.22|3.23|3.24
@@ -188,6 +191,7 @@ bash reinstall.sh anolis      7|8|23
 - `--ssh-key KEY` 设置 SSH 登录公钥，[格式如下](#--ssh-key)。当使用公钥时，密码为空
 - `--ssh-port PORT` 修改 SSH 端口
 - `--web-port PORT` 修改 Web 端口（安装期间观察日志用）
+- `--static` 强制静态 IP，沿用重装前的 IP 和网关，即使 DHCP 能获取到相同 IP 也不用 DHCP
 - `--frpc-config PATH` 添加 frpc 内网穿透，参数填配置文件的本地路径或 HTTP 链接
 - `--hold 1` 仅重启到安装环境，不运行安装，用于 SSH 登录验证网络连通性
 - `--hold 2` 安装结束后不重启，用于 SSH 登录修改系统内容，Debian/Kali 会挂载在 `/target`，其它系统会挂载在 `/os`
@@ -260,6 +264,7 @@ bash reinstall.sh dd --img "https://example.com/xxx.xz"
 - `--ssh-port PORT` 修改 SSH 端口（安装期间观察日志用）
 - `--rdp-port PORT` 修改 RDP 端口（仅限 DD Windows）
 - `--web-port PORT` 修改 Web 端口（安装期间观察日志用）
+- `--static` 强制静态 IP，沿用重装前的 IP 和网关，即使 DHCP 能获取到相同 IP 也不用 DHCP
 - `--allow-ping` 设置 Windows 防火墙允许被 Ping（仅限 DD Windows）
 - `--frpc-config PATH` 添加 frpc 内网穿透（仅限 DD Windows），参数填配置文件的本地路径或 HTTP 链接
 - `--cloud-data PATH_OR_URL` 为 DD Linux 镜像注入 cloud-init NoCloud 配置（仅限 DD Linux）
@@ -576,6 +581,7 @@ bash reinstall.sh windows \
 - `--rdp-port PORT` 修改 RDP 端口
 - `--ssh-port PORT` 修改 SSH 端口（安装期间观察日志用）
 - `--web-port PORT` 修改 Web 端口（安装期间观察日志用）
+- `--static` 强制静态 IP，沿用重装前的 IP 和网关，即使 DHCP 能获取到相同 IP 也不用 DHCP
 - `--allow-ping` 设置 Windows 防火墙允许被 Ping
 - `--add-driver INF_OR_DIR` 添加额外驱动，填写 .inf 路径，或者 .inf 所在的文件夹
   - 需先下载驱动到当前系统

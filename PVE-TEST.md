@@ -27,10 +27,10 @@ curl -O https://cdn.jsdelivr.net/gh/xpflying/reinstall@main/reinstall.sh
 
 ```bash
 # 默认装 proxmox 9（基于 Debian 13）
-bash reinstall.sh proxmox --password '你的密码'
+bash reinstall.sh proxmox --password '你的密码' --force-cn --static
 
 # 指定版本：8 基于 Debian 12，9 基于 Debian 13
-bash reinstall.sh proxmox 8 --password '你的密码'
+bash reinstall.sh proxmox 8 --password '你的密码' --force-cn --static
 ```
 
 密码含 `@ # % $` 等特殊字符时用**单引号**包起来。
